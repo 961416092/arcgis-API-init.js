@@ -49650,7 +49650,7 @@ require({
             })
         },
         "esri/layers/DynamicMapServiceLayer": function() {
-            define("dojo/_base/declare dojo/_base/connect dojo/_base/lang dojo/dom-construct dojo/dom-style dojox/gfx/matrix ../kernel ../config ../sniff ../request ../domUtils ./layer ./MapImage dojo/aspect".split(" "), function (p, n, b, m, k, l, f, h, e, c, a, d, r, aspect) {
+            define("dojo/_base/declare dojo/_base/connect dojo/_base/lang dojo/dom-construct dojo/dom-style dojox/gfx/matrix ../kernel ../config ../sniff ../request ../domUtils ./layer ./MapImage dojo/aspect ../geometry/Point".split(" "), function (p, n, b, m, k, l, f, h, e, c, a, d, r, aspect, Point) {
                 var w = h.defaults.map.zoomDuration;
                 p = p(d, {
                     declaredClass: "esri.layers.DynamicMapServiceLayer",
@@ -49661,6 +49661,7 @@ require({
                         this.useMapTime = c && c.hasOwnProperty("useMapTime") ? !!c.useMapTime : !0;
                         this.extentProcessor = c && c.extentProcessor;
                         a = b.hitch;
+                        hitch = b.hitch;
                         clone = b.clone;
                         this._exportMapImageHandler = a(this, this._exportMapImageHandler);
                         this._imgSrcFunc = a(this, this._imgSrcFunc);
@@ -49821,16 +49822,39 @@ require({
                         var ynum = 2;
 
                         // 克隆一个新的地图范围,避免影响到切片服务
+
+                        var layerextent = this.fullExtent;
+
                         var ac = clone(a);
-                        var xmin = a.xmin;
-                        var xmax = a.xmax;
-                        var ymin = a.ymin;
-                        var ymax = a.ymax;
+                        // var xmin = a.xmin;
+                        // var xmax = a.xmax;
+                        // var ymin = a.ymin;
+                        // var ymax = a.ymax;
+
+                        // 对比地图范围和图片范围,找到最小加载范围
+                        var xmin = (a.xmin > layerextent.xmin) ? a.xmin : layerextent.xmin;
+                        var xmax = (layerextent.xmax > a.xmax) ? a.xmax : layerextent.xmax;
+                        var ymin = (a.ymin > layerextent.ymin) ? a.ymin : layerextent.ymin;
+                        var ymax = (layerextent.ymax > a.ymax) ? a.ymax : layerextent.ymax;
+
+                        // 加载范围的左上角屏幕点
+                        var LTpoint = new Point(xmin, ymax, ac.spatialReference)
+                        var LTPoint = this._map.toScreen(LTpoint);
+
+                        // 加载范围的右下角屏幕点
+                        var RBpoint = new Point(xmax, ymin, ac.spatialReference)
+                        var RBPoint = this._map.toScreen(RBpoint);
+
+                        // 计算范围的尺寸（单位PX）
+                        var xPX = RBPoint.x-LTPoint.x;
+                        var yPX = RBPoint.y - LTPoint.y;
 
                         var xmind = (xmax - xmin) / xnum;
                         var ymind = (ymax - ymin) / ynum;
 
                         // 设置到左上角的位置
+                        ac.xmin = xmin;
+                        ac.ymax = ymax;
                         ac.xmax = xmin + xmind;
                         ac.ymin = ymax - ymind;
 
@@ -49847,9 +49871,9 @@ require({
                                     ac.ymax -= ymind;
                                     ac.ymin -= ymind;
                                 }
-                                console.time("set URL"+i+j)
-                                this._getImgByParam(ac, b, c, i, j, xnum, ynum);
-                                console.timeEnd("set URL" + i + j)
+                                // console.time("set URL"+i+j)
+                                this._getImgByParam(ac, b, c, i, j, xnum, ynum, LTPoint, xPX,yPX);
+                                // console.timeEnd("set URL" + i + j)
                             }
                             
                         }
@@ -49857,7 +49881,7 @@ require({
 						// this._getImgByParam(a, b, c);
                     },
 					
-                    _getImgByParam: function (a, b, c, i, j, xnum, ynum) {
+                    _getImgByParam: function (a, b, c, i, j, xnum, ynum, LTpoint, xPX, yPX) {
 						if (!this.suspended) {
                             clearTimeout(this._wakeTimer);
                             this._wakeTimer = null;
@@ -49922,8 +49946,8 @@ require({
                             else {
                                 var myid = i.toString()+j.toString();
 
-                                var xlength = b / xnum ;
-                                var ylength = c / ynum;
+                                var xlength = xPX / xnum ;
+                                var ylength = yPX / ynum;
 
                                 var u = this._img_loading[myid] = m.create("img")
                                   , C = f._css.names
@@ -49935,7 +49959,7 @@ require({
                                 };
                                 8 === I && (E.opacity = this.opacity);
                                 null != t && 0 !== t && (E.marginLeft = t + "px");
-                                "css-transforms" === d.navigationMode ? (E[C.transform] = f._css.translate(-this._left+i*xlength, -this._top+j*ylength),
+                                "css-transforms" === d.navigationMode ? (E[C.transform] = f._css.translate(-this._left + LTpoint.x+i*xlength, -this._top+LTpoint.y+j*ylength),
                                 u._tdx = -this._left,
                                 u._tdy = -this._top,
                                 E[C.transition] = C.transformName + " " + w + "ms ease",
@@ -49983,14 +50007,11 @@ require({
                         !c || c.__panning || c.__zooming ? m.destroy(b) : ( // this._img && this._div.removeChild(this._img),
                         // this._img = b,
 
-                        // this._div.childNodes.forEach(a(this,function(item){
-                        //     if (item.id === b.id) {
-                        //         this._div.removeChild(item)
-                        //     }
-                        // })),
-
-                        img = document.getElementById(b.id),
-                        img && this._div.removeChild(img),
+                        this._div.childNodes.forEach(hitch(this,function(item){
+                            if (item.id === b.id) {
+                                this._div.removeChild(item)
+                            }
+                        })),
 
                         c = b.style,
                         this._startRect = {
