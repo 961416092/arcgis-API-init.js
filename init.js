@@ -49817,8 +49817,8 @@ require({
                         // this._div.innerHTML = "";
 
                         // 切片数
-                        var xnum = 5;
-                        var ynum = 3;
+                        var xnum = 3;
+                        var ynum = 2;
 
                         // 克隆一个新的地图范围,避免影响到切片服务
                         var ac = clone(a);
@@ -49942,7 +49942,8 @@ require({
                                 this.extentProcessor && (E[C.origin] = p / 2 - t + "px " + c / 2 + "px")) : (E.left = "0px",
                                 E.top = "0px");
                                 // u.id = myid+d.id + "_" + this.id + "_" + (new Date).getTime();
-                                u.id = myid + "_" + d.id + "_" + "MyDynamicMapServiceLayer"
+                                // 修改id,加上服务图层的id,避免id重复
+                                u.id = myid + "_" + d.id + "_" + this.id
                                 k.set(u, E);
                                 u._onload_connect = n.connect(u, "onload", this, "_onLoadHandler");
                                 u._onerror_connect = n.connect(u, "onerror", this, "_onErrorHandler");
@@ -49988,11 +49989,6 @@ require({
                         //     }
                         // })),
 
-                        // for (let index = 0; index < array.length; index++) {
-                        //     const element = array[index];
-                            
-                        // }
-
                         img = document.getElementById(b.id),
                         img && this._div.removeChild(img),
 
@@ -50037,7 +50033,7 @@ require({
                         this._map && this._onExtentChangeHandler(this._map.extent)
                     },
                     _onScaleHandler: function(a, b) {
-                        this._div.innerHTML = "";
+                        // this._div.innerHTML = "";
                         var c = {}
                             , d = f._css.names
                             , e = this._img;
