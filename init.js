@@ -27458,6 +27458,7 @@ require({
                 return n
             })
         },
+        // 切片
         "esri/layers/TiledMapServiceLayer": function() {
             define("dojo/_base/declare dojo/_base/connect dojo/_base/lang dojo/_base/array dojo/_base/url dojo/dom-construct dojo/dom-class dojo/dom-geometry dojo/dom-style dojo/dom dojox/collections/ArrayList dojox/gfx/matrix ../kernel ../config ../sniff ../domUtils ../tileUtils ../geometry/Point ../geometry/Rect ../geometry/Extent ./layer".split(" "), function(p, n, b, m, k, l, f, h, e, c, a, d, r, w, t, g, u, q, y, x, z) {
                 p = p(z, {
@@ -49650,7 +49651,7 @@ require({
             })
         },
         "esri/layers/DynamicMapServiceLayer": function() {
-            define("dojo/_base/declare dojo/_base/connect dojo/_base/lang dojo/dom-construct dojo/dom-style dojox/gfx/matrix ../kernel ../config ../sniff ../request ../domUtils ./layer ./MapImage dojo/aspect ../geometry/Point".split(" "), function (p, n, b, m, k, l, f, h, e, c, a, d, r, aspect, Point) {
+            define("dojo/_base/declare dojo/_base/connect dojo/_base/lang dojo/dom-construct dojo/dom-style dojox/gfx/matrix ../kernel ../config ../sniff ../request ../domUtils ./layer ./MapImage dojo/aspect ../geometry/Point ../tasks/GeometryService ../SpatialReference".split(" "), function (p, n, b, m, k, l, f, h, e, c, a, d, r, aspect, Point, GeometryService, SpatialReference) {
                 var w = h.defaults.map.zoomDuration;
                 p = p(d, {
                     declaredClass: "esri.layers.DynamicMapServiceLayer",
@@ -49669,7 +49670,6 @@ require({
                         this._tileLoadHandler = a(this, this._tileLoadHandler);
                         this._tileErrorHandler = a(this, this._tileErrorHandler);
                         this.registerConnectEvents();
-                        this.FirstLoadThisDynamicLayer=true;
                     },
                     opacity: 1,
                     isPNG32: !1,
@@ -49678,6 +49678,8 @@ require({
                         this._map = a;
                         var d = this._div = m.create("div", null, b)
                           , g = f._css.names
+                          , q = a.__visibleDelta
+                          , connect = n.connect
                           , h = {
                             position: "absolute",
                             width: a.width + "px",
@@ -49692,11 +49694,20 @@ require({
                         "css-transforms" === a.navigationMode ? (this._isChildLayer || (h[g.transform] = f._css.translate(p.x, p.y),
                         k.set(d, h)),
                         this._left = p.x,
-                        this._top = p.y) : (h.left = "0px",
+                        this._top = p.y,
+                        
+                        // 设置缩放动画
+                        delete h[g.transform],
+                        h[g.transform] = f.transformName + " " + "500" + "ms ease",
+                        k.set(this._active = m.create("div", null, d), h),
+                        this._active._remove = 0,
+                        this._passives = []
+                        ) : (h.left = "0px",
                         h.top = "0px",
                         k.set(d, h),
                         this._left = this._top = 0);
-                        k.set(d, h);
+                        // k.set(d, h); 不知道有什么用,先注释
+
                         this._onResizeHandler_connect = r(a, "onResize", this, "_onResizeHandler");
                         this._opacityChangeHandler_connect = r(this, "onOpacityChange", this, "_opacityChangeHandler");
                         this._img_loading = [];
@@ -49713,11 +49724,6 @@ require({
                             });
                         this.extentProcessor && (this._panEndEvalHandle = n.connect(a, "onPanEnd", this, this.evaluateSuspension),
                         this._zoomEndEvalHandle = n.connect(a, "onZoomEnd", this, this.evaluateSuspension));
-
-                        // 设置缩放动画
-                        h["-webkit-transform"] = "-webkit-transform " + "500" + "ms ease",
-                            k.set(this._active = m.create("div", null, d), h)
-                        // this._active = m.create("div", null, this._div)
                         
                         return d
                     },
@@ -49821,30 +49827,30 @@ require({
                             top: a.y + b.y + "px"
                         }))
                     },
-                    _onExtentChangeHandler: function (a, b, c) {
-                        if (!this.fristTime){
+                    _onExtentChangeHandler: function (a, b, c) {  // 当地图范围发生了改变
+                        if (!this.fristTime){  // 判断是否第一次操作
                             this.fristTime = (new Date()).getTime();
                             this._isHasLastLoad(a, b, c);
                         } else{
                             var currTime = (new Date()).getTime();
-                            if ((currTime - this.fristTime) < 500) {
-                                this.fristTime = currTime;
+                            if ((currTime - this.fristTime) < 500) {  // 如果操作间隔时间小于0.5秒
+                                this.fristTime = currTime;  // 重新对操作间隔时间进行计算
                                 if (this.timeId) {
                                     clearTimeout(this.timeId);
                                 }
-                            } else{
-                                this._startGetImg(a, b, c);
-                                this.fristTime = null;
-                            }
+                            } 
+                            // 如果大于0.5秒直接在_isHasLastLoad方法会调用_startGetImg,不用else
+                            // else{
+                            //     this._startGetImg(a, b, c);
+                            //     this.fristTime = null;
+                            // }
                             this._isHasLastLoad(a, b, c);
                         }
-
-                       
                     },
 
                     _isHasLastLoad: function (a, b, c) {
                         this.timeId = setTimeout(hitch(this, function () {
-                            this._startGetImg(a, b, c);
+                            this._UnifiedSR(a, b, c);  // 开始请求服务
                             if (this.timeId) {
                                 clearTimeout(this.timeId);
                             }
@@ -49852,86 +49858,95 @@ require({
                         }), 600);
                     },
 
+                    _UnifiedSR:function (a,b,c) {
+                        // 克隆一个新的地图范围,避免影响到切片服务
+                        this.layerextent = clone(this.fullExtent);
+                        var ac = clone(a);
+
+                        // 统一地图和图层的坐标系 
+                        if (this.spatialReference.wkid !== a.spatialReference.wkid) {
+                            // 如果坐标系不统一,转换坐标系
+                            var LTpoint = new Point(this.layerextent.xmin, this.layerextent.ymax, this.layerextent.spatialReference)
+                            var RBpoint = new Point(this.layerextent.xmax, this.layerextent.ymin, this.layerextent.spatialReference)
+                            var geometryService = new GeometryService("https://localhost:6443/arcgis/rest/services/Utilities/Geometry/GeometryServer");
+                            // var geometryService = new GeometryService("https://sampleserver6.arcgisonline.com/arcgis/rest/services/Utilities/Geometry/GeometryServer");
+                            geometryService.project([LTpoint, RBpoint], new SpatialReference(a.spatialReference.wkid), hitch(this,function (p) {
+                                this.layerextent.xmin = p[0].x;
+                                this.layerextent.ymin = p[1].y;
+                                this.layerextent.xmax = p[1].x;
+                                this.layerextent.ymax = p[0].y;
+                                this._startGetImg(ac, b, c);
+                            }));
+                        }else{
+                            _startGetImg(ac, b, c);
+                        }
+                    },
+                    
                     _startGetImg: function (a, b, c) {
-                        // 判断是否第一次加载
-                        if (this.FirstLoadThisDynamicLayer) {
-                            //this.FirstLoadThisDynamicLayer = false
+                        var layerextent = this.layerextent;
 
-                            // 切片数
-                            var xnum = 2;
-                            var ynum = 2;
+                        // 切片数
+                        var xnum = 2;
+                        var ynum = 2;
 
-                            // 克隆一个新的地图范围,避免影响到切片服务
+                        // 对比地图范围和图片范围,找到最小加载范围
+                        var xmin = (a.xmin > layerextent.xmin) ? a.xmin : layerextent.xmin;
+                        var xmax = (layerextent.xmax > a.xmax) ? a.xmax : layerextent.xmax;
+                        var ymin = (a.ymin > layerextent.ymin) ? a.ymin : layerextent.ymin;
+                        var ymax = (layerextent.ymax > a.ymax) ? a.ymax : layerextent.ymax;
 
-                            var layerextent = this.fullExtent;
+                        // 加载范围的左上角屏幕点
+                        var LTpoint = new Point(xmin, ymax, a.spatialReference)
+                        var LTPoint = this._map.toScreen(LTpoint);
 
-                            var ac = clone(a);
-                            // var xmin = a.xmin;
-                            // var xmax = a.xmax;
-                            // var ymin = a.ymin;
-                            // var ymax = a.ymax;
+                        // 加载范围的右下角屏幕点
+                        var RBpoint = new Point(xmax, ymin, a.spatialReference)
+                        var RBPoint = this._map.toScreen(RBpoint);
 
-                            // 对比地图范围和图片范围,找到最小加载范围
-                            var xmin = (a.xmin > layerextent.xmin) ? a.xmin : layerextent.xmin;
-                            var xmax = (layerextent.xmax > a.xmax) ? a.xmax : layerextent.xmax;
-                            var ymin = (a.ymin > layerextent.ymin) ? a.ymin : layerextent.ymin;
-                            var ymax = (layerextent.ymax > a.ymax) ? a.ymax : layerextent.ymax;
-
-                            // 加载范围的左上角屏幕点
-                            var LTpoint = new Point(xmin, ymax, ac.spatialReference)
-                            var LTPoint = this._map.toScreen(LTpoint);
-
-                            // 加载范围的右下角屏幕点
-                            var RBpoint = new Point(xmax, ymin, ac.spatialReference)
-                            var RBPoint = this._map.toScreen(RBpoint);
-
-                            if (!this.xPX) {
-                                // 计算范围的尺寸（单位PX）
-                                this.xPX = RBPoint.x - LTPoint.x;
-                                this.yPX = RBPoint.y - LTPoint.y;
-                            }
-                            else {
-                                var xPX = RBPoint.x - LTPoint.x;
-                                var yPX = RBPoint.y - LTPoint.y;
-                                if (this.xPX >= xPX && this.yPX >= yPX && this.xPX !== this._map.width && this.yPX !== this._map.height) {
-                                    return
-                                } else {
-                                    this.xPX = xPX;
-                                    this.yPX = yPX;
-                                }
-                            }
-
-                            var xmind = (xmax - xmin) / xnum;
-                            var ymind = (ymax - ymin) / ynum;
-
-                            // 设置到左上角的位置
-                            ac.xmin = xmin;
-                            ac.ymax = ymax;
-                            ac.xmax = xmin + xmind;
-                            ac.ymin = ymax - ymind;
-
-                            for (var i = 0; i < xnum; i++) {
-                                if (i !== 0) {
-                                    ac.xmax += xmind;
-                                    ac.xmin += xmind;
-                                }
-                                ac.ymax = ymax;
-                                ac.ymin = ymax - ymind;
-
-                                for (var j = 0; j < ynum; j++) {
-                                    if (j !== 0) {
-                                        ac.ymax -= ymind;
-                                        ac.ymin -= ymind;
-                                    }
-                                    // console.time("set URL"+i+j)
-                                    this._getImgByParam(ac, b, c, i, j, xnum, ynum, LTPoint, this.xPX, this.yPX);
-                                    // console.timeEnd("set URL" + i + j)
-                                }
-
-                            }
+                        if (!this.xPX) {
+                            // 计算范围的尺寸（单位PX）
+                            this.xPX = RBPoint.x - LTPoint.x;
+                            this.yPX = RBPoint.y - LTPoint.y;
                         }
                         else {
-                            this._getImgByParam(a, b, c);
+                            // 对比操作前后的图层显示范围
+                            var xPX = RBPoint.x - LTPoint.x;
+                            var yPX = RBPoint.y - LTPoint.y;
+                            // 如果操作后的请求范围不变或更小，则不进行新的请求
+                            if (this.xPX >= xPX && this.yPX >= yPX && this.xPX !== this._map.width && this.yPX !== this._map.height) {
+                                return
+                            } else {
+                                this.xPX = xPX;
+                                this.yPX = yPX;
+                            }
+                        }
+
+                        var xmind = (xmax - xmin) / xnum;
+                        var ymind = (ymax - ymin) / ynum;
+
+                        // 设置到左上角的位置
+                        a.xmin = xmin;
+                        a.ymax = ymax;
+                        a.xmax = xmin + xmind;
+                        a.ymin = ymax - ymind;
+
+                        for (var i = 0; i < xnum; i++) {
+                            if (i !== 0) {
+                                a.xmax += xmind;
+                                a.xmin += xmind;
+                            }
+                            a.ymax = ymax;
+                            a.ymin = ymax - ymind;
+
+                            for (var j = 0; j < ynum; j++) {
+                                if (j !== 0) {
+                                    a.ymax -= ymind;
+                                    a.ymin -= ymind;
+                                }
+                                // console.time("set URL"+i+j)
+                                this._getImgByParam(a, b, c, i, j, xnum, ynum, LTPoint, this.xPX, this.yPX);
+                                // console.timeEnd("set URL" + i + j)
+                            }
                         }
                     },
 
@@ -50016,7 +50031,7 @@ require({
                                 "css-transforms" === d.navigationMode ? (E[C.transform] = f._css.translate(-this._left + LTpoint.x + i * xlength, -this._top + LTpoint.y + j * ylength),
                                     u._tdx = -this._left,
                                     u._tdy = -this._top,
-                                    E[C.transition] = C.transformName + " " + w + "ms ease",
+                                    // E[C.transition] = C.transformName + " " + w + "ms ease",
                                     this.extentProcessor && (E[C.origin] = p / 2 - t + "px " + c / 2 + "px")) : (E.left = "0px",
                                         E.top = "0px");
                                 // u.id = myid+d.id + "_" + this.id + "_" + (new Date).getTime();
@@ -50130,26 +50145,52 @@ require({
                     },
                     _onScaleHandler: function(a, b) {
                         // this._div.innerHTML = "";
-                        var c = {}
-                            , d = f._css.names
-                             , e = this._img;
-                            //, e = this._active;
-                        if (e) {
-                            k.set(e, d.transition, b ? "none" : d.transformName + " " + w + "ms ease");
-                            e._matrix = a;
-                            a = e._multiply ? l.multiply(a, e._multiply) : a;
-                            if (e._tdx || e._tdy)
-                                a = l.multiply(a, {
-                                    xx: 1,
-                                    xy: 0,
-                                    yx: 0,
-                                    yy: 1,
-                                    dx: e._tdx,
-                                    dy: e._tdy
-                                });
-                            c[d.transform] = f._css.matrix(a);
-                            k.set(e, c)
+                        // var c = {}
+                        //     , d = f._css.names
+                        //     , e = this._img
+                        //     , e = this._active;
+                        // if (e) {
+                        //     k.set(e, d.transition, b ? "none" : d.transformName + " " + w + "ms ease");
+                        //     e._matrix = a;
+                        //     a = e._multiply ? l.multiply(a, e._multiply) : a;
+                        //     if (e._tdx || e._tdy)
+                        //         a = l.multiply(a, {
+                        //             xx: 1,
+                        //             xy: 0,
+                        //             yx: 0,
+                        //             yy: 1,
+                        //             dx: e._tdx,
+                        //             dy: e._tdy
+                        //         });
+                        //     c[d.transform] = f._css.matrix(a);
+                        //     k.set(e, c)
+                        // }
+
+                        var _passivesL, ggg = {}, d = f._css.names, map = this._map;
+                        for (_passivesL = this._passives.length - 1; 0 <= c; c--) {
+                            var kk = this._passives[c];
+                            0 === kk.childNodes.length ? (this._passives.splice(c, 1),
+                                l.destroy(kk)) : ("none" === kk.style[d.transition] && e.set(kk, d.transition, d.transformName + " " + "500" + "ms ease"),
+                                    k.set(kk, d.transition, b ? "none" : d.transformName + " " + h + "ms ease"),
+                                    kk._matrix = a,
+                                    ggg[d.transform] = r._css.matrix(kk._multiply ? d.multiply(a, kk._multiply) : a),
+                                    k.set(kk, ggg))
                         }
+                        this._active && 0 === this._active.childNodes.length || (e.set(this._active, d.transition, b ? "none" : d.transformName + " " + "500" + "ms ease"),
+                            this._active._matrix = a,
+                            ggg[d.transform] = r._css.matrix(this._active._matrix),
+                            k.set(this._active, ggg),
+                            this._passives.push(this._active),
+                            ggg = {
+                                position: "absolute",
+                                width: map.width + "px",
+                                height: map.height + "px",
+                                overflow: "visible"
+                            },
+                            ggg[d.transition] = d.transformName + " " + "500" + "ms ease",
+                            k.set(this._active = l.create("div", null, this._div), g),
+                            this._active._remove = 0,
+                            map.fadeOnZoom && l.place(this._active, this._div, "first"))
                     },
                     _onZoomHandler: function(a, b, c) {
                         a = this._startRect;
