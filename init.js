@@ -49701,7 +49701,8 @@ require({
                         h[g.transform] = f.transformName + " " + "500" + "ms ease",
                         k.set(this._active = m.create("div", null, d), h),
                         this._active._remove = 0,
-                        this._passives = []
+                        this._passives = [],
+                        this.matrix = []
                         ) : (h.left = "0px",
                         h.top = "0px",
                         k.set(d, h),
@@ -49792,9 +49793,15 @@ require({
                         b && (this._onPanHandler_connect = a(b, "onPan", this, "_onPanHandler"),
                         this._onExtentChangeHandler_connect = a(b, "onExtentChange", this, "_onExtentChangeHandler"),
                             "css-transforms" === b.navigationMode ? this._onScaleHandler_connect = a(b, "onScale", this, this._onScaleHandler) : this._onZoomHandler_connect = a(b, "onZoom", this, "_onZoomHandler")); 
-                        // aspect.before(b, "onScale", function () {
-                        //         that._div.innerHTML="";                                
-                        //     });
+                        // aspect.after(b, "onScale", hitch(this,function () {
+                        //     var ReferencePoint = this._map.toScreen(this.Referencepoint);
+                        //     a.dx = ReferencePoint.x - this.ReferencePoint.x;
+                        //     a.dy = ReferencePoint.y - this.ReferencePoint.y;
+                        //     a.xx = 0;
+                        //     a.yy = 0;
+                        //     ggg[d.transform] = f._css.matrix(a)
+                        //     k.set(this._active, ggg);                               
+                        // }));
                     },
                     _disableDrawConnectors: function() {
                         var a = n.disconnect;
@@ -49878,7 +49885,7 @@ require({
                                 this._startGetImg(ac, b, c);
                             }));
                         }else{
-                            _startGetImg(ac, b, c);
+                            this._startGetImg(ac, b, c);
                         }
                     },
                     
@@ -49907,13 +49914,17 @@ require({
                             // 计算范围的尺寸（单位PX）
                             this.xPX = RBPoint.x - LTPoint.x;
                             this.yPX = RBPoint.y - LTPoint.y;
+                            this.nowScale = this._map.getScale();
                         }
                         else {
+                            var nowScale = this._map.getScale();
+
                             // 对比操作前后的图层显示范围
                             var xPX = RBPoint.x - LTPoint.x;
                             var yPX = RBPoint.y - LTPoint.y;
                             // 如果操作后的请求范围不变或更小，则不进行新的请求
-                            if (this.xPX >= xPX && this.yPX >= yPX && this.xPX !== this._map.width && this.yPX !== this._map.height) {
+                            // 由于缩放动画的缘故,如果比例尺变了,要从新请求  nowScale === this.nowScale &&
+                            if ( this.xPX >= xPX && this.yPX >= yPX && this.xPX !== this._map.width && this.yPX !== this._map.height) {
                                 return
                             } else {
                                 this.xPX = xPX;
@@ -50018,14 +50029,21 @@ require({
                                 var xlength = xPX / xnum;
                                 var ylength = yPX / ynum;
 
-                                var u = this._img_loading[myid] = m.create("img")
-                                    , C = f._css.names
-                                    , I = e("ie")
-                                    , E = {
-                                        position: "absolute",
-                                        width: xlength + "px",
-                                        height: ylength + "px"
-                                    };
+                                // 如果img没有加载出来,又来了一个新的请求,直接将当前的img标签的src替换,不生成新的img
+                                if (!this._img_loading[myid] || this._img_loading[myid].isload){
+                                    var u = this._img_loading[myid] = m.create("img")
+                                }else{
+                                    var u = this._img_loading[myid]
+                                }
+                                u.isload = false;
+                                // var u = this._img_loading[myid] = m.create("img"),
+                                var C = f._css.names
+                                , I = e("ie")
+                                , E = {
+                                    position: "absolute",
+                                    width: xlength + "px",
+                                    height: ylength + "px"
+                                };
                                 8 === I && (E.opacity = this.opacity);
                                 null != t && 0 !== t && (E.marginLeft = t + "px");
                                 "css-transforms" === d.navigationMode ? (E[C.transform] = f._css.translate(-this._left + LTpoint.x + i * xlength, -this._top + LTpoint.y + j * ylength),
@@ -50071,8 +50089,19 @@ require({
                     },
                     _onLoadHandler: function(b) {
                         b = b.currentTarget;
-                        var c = this._map;
+                        var _passivesL, c = this._map;
                         this._clearEventListeners(b);
+                        // 清除用于缩放的效果的DIV
+                        if (this._active.childNodes.length === 3) {
+                            for (_passivesL = this._passives.length - 1; 0 <= _passivesL; _passivesL--) {
+                            var item = this._passives[_passivesL];
+                            this._passives.splice(_passivesL, 1),
+                            m.destroy(item)
+                            }
+                        }
+
+                        this._img_loading[b.id.split("_")[0]].isload = true;
+
                         !c || c.__panning || c.__zooming ? m.destroy(b) : ( // this._img && this._div.removeChild(this._img),
                         // this._img = b,
                             (this._active.childNodes.length >= 4) && (b.id = (b.id+'@new')),
@@ -50144,53 +50173,66 @@ require({
                         this._map && this._onExtentChangeHandler(this._map.extent)
                     },
                     _onScaleHandler: function(a, b) {
-                        // this._div.innerHTML = "";
-                        // var c = {}
-                        //     , d = f._css.names
-                        //     , e = this._img
-                        //     , e = this._active;
-                        // if (e) {
-                        //     k.set(e, d.transition, b ? "none" : d.transformName + " " + w + "ms ease");
-                        //     e._matrix = a;
-                        //     a = e._multiply ? l.multiply(a, e._multiply) : a;
-                        //     if (e._tdx || e._tdy)
-                        //         a = l.multiply(a, {
-                        //             xx: 1,
-                        //             xy: 0,
-                        //             yx: 0,
-                        //             yy: 1,
-                        //             dx: e._tdx,
-                        //             dy: e._tdy
-                        //         });
-                        //     c[d.transform] = f._css.matrix(a);
-                        //     k.set(e, c)
-                        // }
+                        var ggg = {}, d = f._css.names, map = this._map;
+                        var ac = clone(a)
+                        this.matrix.push(ac);
 
-                        var _passivesL, ggg = {}, d = f._css.names, map = this._map;
-                        for (_passivesL = this._passives.length - 1; 0 <= c; c--) {
-                            var kk = this._passives[c];
-                            0 === kk.childNodes.length ? (this._passives.splice(c, 1),
-                                l.destroy(kk)) : ("none" === kk.style[d.transition] && e.set(kk, d.transition, d.transformName + " " + "500" + "ms ease"),
-                                    k.set(kk, d.transition, b ? "none" : d.transformName + " " + h + "ms ease"),
-                                    kk._matrix = a,
-                                    ggg[d.transform] = r._css.matrix(kk._multiply ? d.multiply(a, kk._multiply) : a),
-                                    k.set(kk, ggg))
-                        }
-                        this._active && 0 === this._active.childNodes.length || (e.set(this._active, d.transition, b ? "none" : d.transformName + " " + "500" + "ms ease"),
-                            this._active._matrix = a,
-                            ggg[d.transform] = r._css.matrix(this._active._matrix),
-                            k.set(this._active, ggg),
-                            this._passives.push(this._active),
+                        if(4 === this._active.childNodes.length) {
+                        // if (true) {
+                            k.set(this._active, d.transition, b ? "none" : d.transformName + " " + "500" + "ms ease");
+                            this._active._matrix = a;
+                            ggg[d.transform] = f._css.matrix(this._active._matrix);
+                            k.set(this._active, ggg);
+                            this._passives.push(this._active);
                             ggg = {
                                 position: "absolute",
                                 width: map.width + "px",
                                 height: map.height + "px",
                                 overflow: "visible"
-                            },
-                            ggg[d.transition] = d.transformName + " " + "500" + "ms ease",
-                            k.set(this._active = l.create("div", null, this._div), g),
-                            this._active._remove = 0,
-                            map.fadeOnZoom && l.place(this._active, this._div, "first"))
+                            };
+                            ggg[d.transition] = d.transformName + " " + "500" + "ms ease";
+                            k.set(this._active = m.create("div", null, this._div), ggg);
+                            this._active._remove = 0;
+                            map.fadeOnZoom && m.place(this._active, this._div, "first");
+                            this.matrix = [];
+                            this.matrix.push(ac);
+                        }
+                        else{
+                            // 动画缩放比例
+                            for (var i = 0; i < this.matrix.length - 1; i++) {
+                                a.xx *= this.matrix[i].xx;
+                                a.yy *= this.matrix[i].yy;
+                            }
+
+                            // 偏移位置(待改进)
+                            for (var i = 0; i < this.matrix.length; i++) {
+                                if(i === 0){
+                                    var x = this.matrix[i].dx;
+                                    var y = this.matrix[i].dy;
+                                    var xx = 1;
+                                    var yy = 1;
+                                    a.dx = 0;
+                                    a.dy = 0;
+                                }
+                                else {
+                                    for (var j = 0; j < i; j++){
+                                        xx *= this.matrix[j].xx;
+                                        yy *= this.matrix[j].yy;
+                                    }
+                                    var x = this.matrix[i].dx;
+                                    var y = this.matrix[i].dy;
+                                }
+                                
+                                a.dx += x*xx;
+                                a.dy += y*yy;
+                                x = 0;
+                                y = 0;
+                                xx = 1;
+                                yy = 1;
+                            }
+                            ggg[d.transform] = f._css.matrix(a)
+                            k.set(this._passives[0], ggg)    
+                        }            
                     },
                     _onZoomHandler: function(a, b, c) {
                         a = this._startRect;
